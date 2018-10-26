@@ -29,7 +29,7 @@
     },
     "scripts": {
         "prepare": "lsc -b -c -o ./ src/mmap-io.ls src/test.ls",
-        "install": "prebuild-install --verbose --force -d --runtime electron -t 3.0.4",
+        "install": "prebuild-install --verbose || (node-gyp configure && node-gyp rebuild)",
         "postinstall": "make ls",
         "test": "node ./test.js"
     },
