@@ -29,7 +29,7 @@
     },
     "scripts": {
         "prepare": "lsc -b -c -o ./ src/mmap-io.ls src/test.ls",
-        "install": "node-gyp configure && node-gyp rebuild",
+        "install": "prebuild-install || (node-gyp configure && node-gyp rebuild)",
         "postinstall": "make ls",
         "test": "node ./test.js"
     },
