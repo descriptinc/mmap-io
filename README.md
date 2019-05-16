@@ -40,5 +40,5 @@ yarn global remove prebuild
 yarn cache clean
 yarn global upgrade-interactive
 yarn global add prebuild
-prebuild -t 4.0.1 -r electron
+prebuild -t <ELECTRON_VERSION> -r electron
 ```
