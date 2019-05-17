@@ -29,8 +29,8 @@
     },
     "scripts": {
         "clean": "rm -rf build ./build/es-release/mmap-io.d.ts",
-        "build": "yarn build-addon && yarn build-es && yarn test",
-        "build-addon": "node-gyp configure && node-gyp rebuild",
+        "build": "yarn build-addon && yarn build-es",
+        "build-addon": "node-gyp configure && node-gyp rebuild --target=5.0.1 --arch=x64 --dist-url=https://atom.io/download/electron",
         "build-es": "./node_modules/typescript/bin/tsc && cp ./build/es-release/mmap-io.d.ts ./",
         "prepublish": "yarn build",
         "install": "prebuild-install || yarn build-addon",
