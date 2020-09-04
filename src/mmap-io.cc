@@ -47,6 +47,59 @@ inline int do_mmap_advice(char* addr, size_t length, int advise) {
     return madvise(static_cast<void*>(addr), length, advise);
 }
 
+
+/*
+
+disables fancy C++17 code for now because of brickwall time consumption of
+getting compilers to work on travis, etc...
+
+/ **
+ * Make it simpler the next time V8 breaks API's and such with a wrapper fn...
+ * /
+template <typename T, typename VT>
+inline auto get_v(VT v8_value) -> T {
+    if constexpr (std::is_same<unsigned long, T>::value) {
+        return static_cast<size_t>(Nan::To<int>(v8_value).FromJust());
+    } else {
+        return Nan::To<T>(v8_value).FromJust();
+    }
+}
+
+/ **
+ * Make it simpler the next time V8 breaks API's and such with a wrapper fn...
+ * /
+template <typename T, typename VT>
+inline auto get_v(VT v8_value, T default_value) -> T {
+    if constexpr (std::is_same<unsigned long, T>::value) {
+        return static_cast<size_t>(Nan::To<int>(v8_value).FromMaybe(static_cast<int>(default_value)));
+    } else {
+        return Nan::To<T>(v8_value).FromMaybe(default_value);
+    }
+}
+
+*/
+
+/**
+ * Make it simpler the next time V8 breaks API's and such with a wrapper fn...
+ */
+template <typename T, typename VT>
+inline auto get_v(VT v8_value) -> T {
+    return Nan::To<T>(v8_value).FromJust();
+}
+
+/**
+ * Make it simpler the next time V8 breaks API's and such with a wrapper fn...
+ */
+template <typename T, typename VT>
+inline auto get_v(VT v8_value, T default_value) -> T {
+    return Nan::To<T>(v8_value).FromMaybe(default_value);
+}
+
+template <typename VT>
+inline auto get_obj(VT v8_obj) -> Local<Object> {
+    return Nan::To<Object>(v8_obj).ToLocalChecked();
+}
+
 JS_FN(mmap_map) {
     Nan::HandleScope();
 
@@ -64,12 +117,12 @@ JS_FN(mmap_map) {
     // Offset and advise are optional
 
     constexpr void* hinted_address  = nullptr;  // Just making things uber-clear...
-    const size_t    size            = Nan::To<int>(info[0]).FromJust(); //ToInteger()->Value();   // ToUint64()->Value();
-    const int       protection      = info[1]->IntegerValue();
-    const int       flags           = info[2]->ToInteger()->Value();
-    const int       fd              = info[3]->ToInteger()->Value();
-    const size_t    offset          = info[4]->ToInteger()->Value();   // ToInt64()->Value();
-    const int       advise          = info[5]->ToInteger()->Value();
+    const size_t    size            = static_cast<size_t>(get_v<int>(info[0]));
+    const int       protection      = get_v<int>(info[1]);
+    const int       flags           = get_v<int>(info[2]);
+    const int       fd              = get_v<int>(info[3]);
+    const size_t    offset          = static_cast<size_t>(get_v<int>(info[4], 0));
+    const int       advise          = get_v<int>(info[5], 0);
 
     char* data = static_cast<char*>( mmap( hinted_address, size, protection, flags, fd, offset) );
 
@@ -121,21 +174,23 @@ JS_FN(mmap_advise) {
     if (!info[0]->IsObject())    return Nan::ThrowError("advice(): buffer (arg[0]) must be a Buffer");
     if (!info[1]->IsNumber())    return Nan::ThrowError("advice(): (arg[1]) must be an integer");
 
-    Local<Object>   buf     = info[0]->ToObject();
+    Local<Object>   buf     = get_obj(info[0]); // info[0]->ToObject(); // get_v<Local<Object>>(info[0]);
     char*           data    = node::Buffer::Data(buf);
     size_t          size    = node::Buffer::Length(buf);
-    int ret;
 
-    if (info.Length() == 2) {
-        int advise = info[1]->ToInteger()->Value();
-        ret = do_mmap_advice(data, size, advise);
-    }
-    else {
-        int offset = info[1]->ToInteger()->Value();
-        int length = info[2]->ToInteger()->Value();
-        int advise = info[3]->ToInteger()->Value();
-        ret = do_mmap_advice(data + offset, length, advise);
-    }
+    int ret = ([&]() -> int {
+        if (info.Length() == 2) {
+            int advise = get_v<int>(info[1], 0);
+            return do_mmap_advice(data, size, advise);
+        }
+        else {
+            int offset = get_v<int>(info[1], 0);
+            int length = get_v<int>(info[2], 0);
+            int advise = get_v<int>(info[3], 0);
+            return do_mmap_advice(data + offset, length, advise);
+        }
+    })();
+
     if (ret) {
         return Nan::ThrowError((std::string("madvise() failed, ") + std::to_string(errno)).c_str());
     }
@@ -154,7 +209,7 @@ JS_FN(mmap_incore) {
 
     if (!info[0]->IsObject())    return Nan::ThrowError("advice(): buffer (arg[0]) must be a Buffer");
 
-    Local<Object>   buf     = info[0]->ToObject();
+    Local<Object>   buf     = get_obj(info[0]); // info[0]->ToObject(); // get_v<Local<Object>>(info[0]);
     char*           data    = node::Buffer::Data(buf);
     size_t          size    = node::Buffer::Length(buf);
 
@@ -170,19 +225,19 @@ JS_FN(mmap_incore) {
     size_t          pages = size / page_size;
 
 #ifdef __APPLE__
-    char*  resultData = (char *)malloc(needed_bytes);
+    char*  result_data = static_cast<char *>(malloc(needed_bytes));
 #else
-    unsigned char*  resultData = (unsigned char *)malloc(needed_bytes);
+    unsigned char*  result_data = static_cast<unsigned char *>(malloc(needed_bytes));
 #endif
 
     if (size % page_size > 0) {
         pages++;
     }
 
-    int ret = mincore(data, size, resultData);
+    int ret = mincore(data, size, result_data);
 
     if (ret) {
-        free(resultData);
+        free(result_data);
         if (errno == ENOSYS) {
             return Nan::ThrowError("mincore() not implemented");
         } else {
@@ -195,14 +250,14 @@ JS_FN(mmap_incore) {
     uint32_t pages_unmapped = 0;
 
     for(size_t i = 0; i < pages; i++) {
-        if(!(resultData[i] & 0x1)) {
+        if(!(result_data[i] & 0x1)) {
             pages_unmapped++;
         } else {
             pages_mapped++;
         }
     }
 
-    free(resultData);
+    free(result_data);
 
     v8::Local<v8::Array> arr = Nan::New<v8::Array>(2);
     Nan::Set(arr, 0, Nan::New(pages_unmapped));
@@ -223,13 +278,13 @@ JS_FN(mmap_sync_lib_private_) {
 
     if (!info[0]->IsObject())    return Nan::ThrowError("sync(): buffer (arg[0]) must be a Buffer");
 
-    Local<Object>   buf             = info[0]->ToObject();
+    Local<Object>   buf             = get_obj(info[0]); // info[0]->ToObject(); // get_v<Local<Object>>(info[0]);
     char*           data            = node::Buffer::Data(buf);
 
-    int             offset          = info[1]->ToInteger()->Value();
-    size_t          length          = info[2]->ToInteger()->Value();
-    bool            blocking_sync   = info[3]->ToBoolean()->Value();
-    bool            invalidate      = info[4]->ToBoolean()->Value();
+    int             offset          = get_v<int>(info[1], 0);
+    size_t          length          = get_v<int>(info[2], 0);
+    bool            blocking_sync   = get_v<bool>(info[3], false);
+    bool            invalidate      = get_v<bool>(info[4], false);
     int             flags           = ( (blocking_sync ? MS_SYNC : MS_ASYNC) | (invalidate ? MS_INVALIDATE : 0) );
 
     int ret = msync(data + offset, length, flags);
@@ -244,7 +299,7 @@ JS_FN(mmap_sync_lib_private_) {
 NAN_MODULE_INIT(Init) {
     auto exports = target;
 
-    constexpr auto property_attrs = static_cast<PropertyAttribute>(
+    constexpr auto std_property_attrs = static_cast<PropertyAttribute>(
         ReadOnly | DontDelete
     );
 
@@ -255,16 +310,16 @@ NAN_MODULE_INIT(Init) {
             exports,
             Nan::New(key).ToLocalChecked(),
             Nan::New(val),
-            property_attrs
+            std_property_attrs
         );
     };
 
     auto set_fn_prop = [&](const char* key, JsFnType fn) -> void {
         Nan::DefineOwnProperty(
             exports,
-            Nan::New(key).ToLocalChecked(),
-            Nan::New<FunctionTemplate>(fn)->GetFunction(),
-            property_attrs
+            Nan::New<v8::String>(key).ToLocalChecked(),
+            Nan::GetFunction(Nan::New<FunctionTemplate>(fn)).ToLocalChecked(),
+            std_property_attrs
         );
     };
 
@@ -310,12 +365,12 @@ NAN_MODULE_INIT(Init) {
     // This one is wrapped by a JS-function and deleted from obj to hide from user
     Nan::DefineOwnProperty(
         exports,
-        Nan::New("sync_lib_private__").ToLocalChecked(),
-        Nan::New<FunctionTemplate>(mmap_sync_lib_private_)->GetFunction(),
+        Nan::New<v8::String>("sync_lib_private__").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<FunctionTemplate>(mmap_sync_lib_private_)).ToLocalChecked(),
         static_cast<PropertyAttribute>(0)
     );
 
 
 }
 
-NODE_MODULE(mmap_io, Init)
+NAN_MODULE_WORKER_ENABLED(mmap_io, Init);
